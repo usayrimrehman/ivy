@@ -1,6 +1,7 @@
 # global
 from typing import Optional, Union, Tuple, Sequence
 import torch
+import itertools
 
 # local
 from ivy.func_wrapper import with_unsupported_dtypes
@@ -503,3 +504,64 @@ def cummin(
     if ivy.exists(out):
         return ivy.inplace_update(out, ret.to(dtype))
     return ret.to(dtype)
+
+@with_unsupported_dtypes(
+    {
+        "2.0.1 and below": (
+            "uint8",
+            "int8",
+            "int16",
+            "int32",
+            "int64",
+            "float16",
+            "bfloat16",
+        )
+    },
+    backend_version,
+)
+def nanquantile(
+    a: Union[(None, torch.Tensor)],
+    q: Union[(None, float)],
+    /,
+    *,
+    axis: Optional[Union[(int, Sequence[int])]] = None,
+    interpolation: str = "linear",
+    keepdims: bool = False,
+    out: Optional[Union[(None, torch.Tensor)]] = None,
+) -> Union[(None, torch.Tensor)]:
+    return compute_nanquantile(a=a,q=q,axis=axis, interpolation=interpolation)
+
+def compute_nanquantile(a,q,axis=None, interpolation='linear'):
+  array=torch.tensor(a)
+  if type(axis) == type(None):
+    array=torch.masked_select(array,torch.logical_not(torch.isnan(array)))
+    quantiles=torch.quantile(x=array,q=q,interpolation=interpolation)
+    return quantiles
+  else:
+      if type(axis)==int:
+        axis=[int(axis)]
+      elif axis.shape == ():
+        axis=[int(axis)]
+      else:
+        temp=[]
+        for row in axis:
+            temp.append(int(row))
+            axis=temp
+  axes = [*range(array.ndim)]
+  axes = axis + [i for i in axes if i not in axis]
+  array = torch.permute(array,axes)
+  quantiles=torch.zeros(array.shape[len(axis):])
+  quantiles = quantiles.numpy()#tf.make_ndarray(tf.make_tensor_proto(quantiles))
+  args1 = [list(range(e)) for e in list(array.shape[:len(axis)])]
+  args2 = [list(range(e)) for e in list(array.shape[len(axis):])]
+  for combination2 in itertools.product(*args2):
+      nanq_inp=[]
+      for combination1 in itertools.product(*args1):
+        val=float(array[combination1][combination2])
+        if not torch.isnan(torch.tensor(val)):
+          nanq_inp.append(val)
+      if len(nanq_inp)==0:
+          nanq_inp.append(val)
+      quantiles[combination2]=float(torch.quantile(torch.tensor(nanq_inp), q=torch.Tensor(q), interpolation=interpolation))
+  quantiles=torch.tensor(quantiles)
+  return quantiles

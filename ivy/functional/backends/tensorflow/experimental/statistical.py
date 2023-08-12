@@ -9,7 +9,7 @@ from ivy import (
     with_supported_device_and_dtypes,
 )
 from .. import backend_version
-
+import itertools
 
 def histogram(
     a: tf.Tensor,
@@ -649,3 +649,70 @@ def cummin(
         return cummin_x
     else:
         return tf.cast(cummin_x, dtype)
+    
+@with_supported_device_and_dtypes(
+    {
+        "2.13.0 and below": {
+            "cpu": ("float32", "float64"),
+            "gpu": ("bfloat16", "float16", "float32", "float64"),
+        }
+    },
+    backend_version,
+)
+def nanquantile(
+    a: Union[(None, tf.Tensor)],
+    q: float,
+    /,
+    *,
+    axis: Optional[Union[(int, Sequence[int])]] = None,
+    interpolation: str = "linear",
+    keepdims: bool = False,
+    out: Optional[Union[(None, tf.Tensor)]] = None,
+) -> Union[(None, tf.Tensor)]:
+    return compute_nanquantile(a=a,q=q,axis=axis, interpolation=interpolation, keepdims=keepdims)
+
+from tensorflow_probability.python.stats.quantiles import _get_best_effort_ndims, _insert_back_keepdims
+def compute_nanquantile(a,q,axis=None, interpolation='linear',keepdims=False):
+  q=q*100
+  array=tf.convert_to_tensor(a)
+  if type(axis) == type(None):
+    array=tf.boolean_mask(array,tf.math.logical_not(tf.math.is_nan(array)))
+    quantiles=tfp.stats.percentile(x=array,q=q,interpolation=interpolation)
+    return quantiles
+  else:
+      if type(axis)==int:
+        axis=[int(axis)]
+      elif axis.shape == ():
+        axis=[int(axis)]
+      else:
+        temp=[]
+        for row in axis:
+            temp.append(int(row))
+            axis=temp
+  axes = [*range(array.ndim)]
+  axes = axis + [i for i in axes if i not in axis]
+  array = tf.transpose(array,axes)
+  quantiles=tf.zeros(array.shape[len(axis):])
+  quantiles = tf.make_ndarray(tf.make_tensor_proto(quantiles))
+  args1 = [list(range(e)) for e in list(array.shape[:len(axis)])]
+  args2 = [list(range(e)) for e in list(array.shape[len(axis):])]
+  for combination2 in itertools.product(*args2):
+      nanq_inp=[]
+      for combination1 in itertools.product(*args1):
+        val=float(array[combination1][combination2])
+        if not tf.math.is_nan(val):
+          nanq_inp.append(val)
+      if len(nanq_inp)==0:
+          nanq_inp.append(val)
+      quantiles[combination2]=float(tfp.stats.percentile(nanq_inp, q=q, interpolation=interpolation))
+  quantiles=tf.constant(quantiles)
+  if keepdims:
+    if axis is None:
+        ones_vec = tf.ones(
+        shape=[_get_best_effort_ndims(x) + _get_best_effort_ndims(q)],
+        dtype=tf.int32)
+        quantiles *= tf.ones(ones_vec, dtype=x.dtype)
+    else:
+        quantiles = _insert_back_keepdims(quantiles, axis)
+  return quantiles
+

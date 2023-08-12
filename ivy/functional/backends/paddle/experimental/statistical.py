@@ -1,6 +1,7 @@
 # global
 from typing import Optional, Union, Tuple, Sequence
 import paddle
+from paddle.fluid.framework import Variable
 import ivy.functional.backends.paddle as paddle_backend
 import ivy
 
@@ -612,3 +613,157 @@ def cummin(
     if reverse:
         cummin_x = paddle.flip(cummin_x, axis=[axis])
     return cummin_x.cast(dtype)
+
+
+@with_unsupported_device_and_dtypes(
+    {
+        "2.5.1 and below": {
+            "cpu": (
+                "int8",
+                "int16",
+                "uint8",
+                "float16",
+                "float32",
+                "float64",
+                "complex64",
+                "complex128",
+                "bool",
+            )
+        }
+    },
+    backend_version,
+)
+def nanquantile(
+    a: Union[(None, paddle.Tensor)],
+    q: Union[(paddle.Tensor, float)],
+    /,
+    *,
+    axis: Optional[Union[(int, Sequence[int])]] = None,
+    interpolation: str = "linear",
+    keepdims: bool = False,
+    out: Optional[Union[(None, paddle.Tensor)]] = None,
+) -> Union[(None, paddle.Tensor)]:
+    return compute_nanquantile(a, q, axis, keepdims, interpolation)
+
+
+def compute_nanquantile(x, q, axis=None, keepdim=False, interpolation='linear'):
+    ignore_nan=True
+    if not isinstance(x, Variable):
+        raise TypeError("input x should be a Tensor.")
+
+    # Validate q
+    if isinstance(q, (int, float)):
+        q = [q]
+    elif isinstance(q, (list, tuple)):
+        if len(q) <= 0:
+            raise ValueError("q should not be empty")
+    else:
+        raise TypeError("Type of q should be int, float, list or tuple.")
+
+    # Validate axis
+    dims = len(x.shape)
+    out_shape = list(x.shape)
+    if axis is None:
+        x = paddle.flatten(x)
+        axis = 0
+        out_shape = [1] * dims
+    else:
+        if isinstance(axis, list):
+            axis_src, axis_dst = [], []
+            for axis_single in axis:
+                if not isinstance(axis_single, int) or not (
+                    axis_single < dims and axis_single >= -dims
+                ):
+                    raise ValueError(
+                        "Axis should be None, int, or a list, element should in range [-rank(x), rank(x))."
+                    )
+                if axis_single < 0:
+                    axis_single = axis_single + dims
+                axis_src.append(axis_single)
+                out_shape[axis_single] = 1
+
+            axis_dst = list(range(-len(axis), 0))
+            x = paddle.moveaxis(x, axis_src, axis_dst)
+            if len(axis_dst) == 0:
+                x = paddle.flatten(x)
+                axis = 0
+            else:
+                x = paddle.flatten(x, axis_dst[0], axis_dst[-1])
+                axis = axis_dst[0]
+        else:
+            if not isinstance(axis, int) or not (axis < dims and axis >= -dims):
+                raise ValueError(
+                    "Axis should be None, int, or a list, element should in range [-rank(x), rank(x))."
+                )
+            if axis < 0:
+                axis += dims
+            out_shape[axis] = 1
+
+    mask = x.isnan()
+    valid_counts = mask.logical_not().sum(
+        axis=axis, keepdim=True, dtype='float64'
+    )
+
+    indices = []
+
+    for q_num in q:
+        if q_num < 0 or q_num > 1:
+            raise ValueError("q should be in range [0, 1]")
+        if in_dynamic_mode():
+            q_num = paddle.to_tensor(q_num, dtype='float64')
+        if ignore_nan:
+            indices.append(q_num * (valid_counts - 1))
+        else:
+            # TODO: Use paddle.index_fill instead of where
+            index = q_num * (valid_counts - 1)
+            last_index = x.shape[axis] - 1
+            nums = paddle.full_like(index, fill_value=last_index)
+            index = paddle.where(mask.any(axis=axis, keepdim=True), nums, index)
+            indices.append(index)
+
+    sorted_tensor = paddle.sort(x, axis)
+
+    outputs = []
+
+    # TODO(chenjianye): replace the for-loop to directly take elements.
+    for index in indices:
+        indices_below = paddle.floor(index).astype(paddle.int32)
+        indices_upper = paddle.ceil(index).astype(paddle.int32)
+        tensor_upper = paddle.take_along_axis(
+            sorted_tensor, indices_upper, axis=axis
+        )
+        tensor_below = paddle.take_along_axis(
+            sorted_tensor, indices_below, axis=axis
+        )
+        weights = index - indices_below.astype('float64')
+        if interpolation=='linear':
+            out = paddle.lerp(
+                tensor_below.astype('float64'),
+                tensor_upper.astype('float64'),
+                weights,
+            )
+        elif interpolation=='lower':
+            out=tensor_below.astype('float64')
+        elif interpolation=='higher':
+            out=tensor_upper.astype('float64')
+        elif interpolation=='nearest':
+            indices_near = paddle.round(index).astype(paddle.int32)
+            tensor_near = paddle.take_along_axis(
+            sorted_tensor, indices_near, axis=axis
+        )
+            out=tensor_near.astype('float64')
+        elif interpolation=='midpoint':
+            out=(tensor_below.astype('float64')+tensor_upper.astype('float64'))/2
+        else:
+            raise ValueError('Argument "interpolation" is not an allowed type.')
+        if not keepdim:
+            out = paddle.squeeze(out, axis=axis)
+        else:
+            out = out.reshape(out_shape)
+        outputs.append(out)
+
+    if len(q) > 1:
+        outputs = paddle.stack(outputs, 0)
+    else:
+        outputs = outputs[0]
+    return outputs

@@ -401,3 +401,17 @@ def igamma(
     out: Optional[JaxArray] = None,
 ) -> JaxArray:
     return jlax.igamma(a=a, x=x)
+
+
+@with_unsupported_dtypes({"0.4.13 and below": "bfloat16"}, backend_version)
+def nanquantile(
+    a: Union[(None, JaxArray)],
+    q: Union[(None, float)],
+    /,
+    *,
+    axis: Optional[Union[(int, Sequence[int])]] = None,
+    interpolation: str = "linear",
+    keepdims: bool = False,
+    out: Optional[Union[(None, JaxArray)]] = None,
+) -> Union[(None, JaxArray)]:
+    return  jnp.nanquantile(a=a, q=q, axis=axis, interpolation=interpolation, keepdims=keepdims)

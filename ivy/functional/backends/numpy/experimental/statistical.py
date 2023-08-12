@@ -403,3 +403,20 @@ def igamma(
 
     igamma_vec = np.vectorize(igamma_cal)
     return igamma_vec(a, x).astype(a.dtype)
+
+
+@with_unsupported_dtypes(
+    {"1.25.0 and below": ("bfloat16",)},
+    backend_version,
+)
+def nanquantile(
+    a: Union[(None, np.ndarray)],
+    q: Union[(None, float)],
+    /,
+    *,
+    axis: Optional[Union[(int, Sequence[int])]] = None,
+    interpolation: str = "linear",
+    keepdims: bool = False,
+    out: Optional[Union[(None, np.ndarray)]] = None,
+) -> Union[(None, np.ndarray)]:
+    return  np.nanquantile(a=a, q=q, axis=axis, interpolation=interpolation, keepdims=keepdims)

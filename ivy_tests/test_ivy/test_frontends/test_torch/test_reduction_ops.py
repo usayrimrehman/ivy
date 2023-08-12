@@ -10,7 +10,7 @@ from ivy_tests.test_ivy.test_functional.test_core.test_statistical import (
     _get_castable_dtype,
 )
 from ivy_tests.test_ivy.test_functional.test_experimental.test_core.test_statistical import (  # noqa
-    _quantile_helper,
+    _quantile_helper, _nanquantile_helper
 )
 
 
@@ -1015,4 +1015,36 @@ def test_torch_unique_consecutive(
         return_counts=ret_counts,
         dim=axis,
         test_values=False,
+    )
+
+@handle_frontend_test(
+    fn_tree="torch.nanquantile",
+    dtype_and_x=_nanquantile_helper(),
+    keepdims=st.booleans(),
+)
+def test_torch_nanquantile(
+    *,
+    dtype_and_x,
+    keepdims,
+    on_device,
+    fn_tree,
+    frontend,
+    test_flags,
+    backend_fw,
+):
+    input_dtype, x, axis, interpolation, q = dtype_and_x
+    if type(axis) is tuple:
+        axis = axis[0]
+    helpers.test_frontend_function(
+        input_dtypes=['float32'],
+        backend_to_test=backend_fw,
+        frontend=frontend,
+        test_flags=test_flags,
+        fn_tree=fn_tree,
+        on_device=on_device,
+        input=x[0],
+        q=q[0],
+        dim=axis,
+        keepdim=keepdims,
+        interpolation=interpolation[0],
     )
