@@ -1899,3 +1899,47 @@ def test_tensorflow_weighted_moments(
         frequency_weights=fw[0],
         keepdims=keepdims,
     )
+import ivy
+# @reproduce_failure('6.82.0', b'AXicY2DAAAAAEwAB')
+@handle_frontend_test(
+    fn_tree="tensorflow.nn.collapse_repeated",
+    dtype_and_labels=helpers.dtype_and_values(
+        available_dtypes=helpers.get_dtypes("integer"),
+        num_arrays=1,
+        shape=(2,5),
+        min_value=2,
+        max_value=9,
+    ),
+    dtype_and_seq_length=helpers.dtype_and_values(
+        available_dtypes=helpers.get_dtypes("integer"),
+        num_arrays=1,
+        shape=(2,),
+        min_value=2,
+        max_value=5,
+    ),
+    test_with_out=st.just(False),
+)
+def test_tensorflow_collapse_repeated(
+    *,
+    dtype_and_labels,
+    dtype_and_seq_length,
+    frontend,
+    test_flags,
+    fn_tree,
+    on_device,
+    backend_fw,
+):
+    lab_dtype, labels = dtype_and_labels
+    seql_dtype, seq_length = dtype_and_seq_length
+    helpers.test_frontend_function(
+        input_dtypes=[ivy.int32],
+        backend_to_test=backend_fw,
+        frontend=frontend,
+        test_flags=test_flags,
+        fn_tree=fn_tree,
+        on_device=on_device,
+        rtol=1e-1,
+        atol=1e-1,
+        labels=labels[0],
+        seq_length = seq_length[0],
+    )
