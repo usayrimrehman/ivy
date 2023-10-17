@@ -725,3 +725,32 @@ def zeros_initializer(shape, dtype=None, name=None):
 @to_ivy_arrays_and_back
 def zeros_like(input, dtype=None, name=None):
     return ivy.zeros_like(input, dtype=dtype)
+
+@with_supported_dtypes(
+    {"2.14 and below": ("int8", "int16", "int32", "int64")}, "tensorflow"
+)
+@to_ivy_arrays_and_back
+def sequence_mask(lengths, maxlen=None, dtype=ivy.bool, name=None):
+    if maxlen is None:
+        maxlen = ivy.maximum(
+            ivy.max(lengths), ivy.max(ivy.arange(ivy.get_num_dims(lengths)))
+        )
+        maxlen = ivy.maximum(0, maxlen)
+    else:
+        maxlen = ivy.array(maxlen)
+    if ivy.get_num_dims(maxlen) is not None and ivy.get_num_dims(maxlen) != 0:
+        raise ValueError(
+            "Argument `maxlen` must be scalar for sequence_mask, "
+            f"received `maxlen` = {maxlen} "
+            f"with shape '{maxlen.get_shape()}' instead"
+        )
+
+    row_vector = ivy.arange(0, int(maxlen), 1)
+    matrix = ivy.expand_dims(lengths, axis=-1)
+    result = row_vector < matrix
+    if dtype == None:
+        return result
+    else:
+        return ivy.astype(result, dtype)
+
+
